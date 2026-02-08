@@ -1,0 +1,60 @@
+name: "Build"
+
+on:
+    push:
+        branches:
+            - "main"
+    workflow_dispatch:
+
+jobs:
+    build:
+        if: |
+            github.event_name == 'workflow_dispatch' ||
+            contains(github.event.head_commit.message, '[build]')
+
+        permissions:
+            contents: write
+
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v6.0.1
+
+            - name: Build with ufbt
+              uses: flipperdevices/flipperzero-ufbt-action@v0.1.3
+              id: build-app
+              with:
+                sdk-channel: dev
+                sdk-index-url: https://up.momentum-fw.dev/firmware/directory.json
+
+            - name: Get app info
+              id: app-info
+              run: |
+                APP_NAME=$(grep -E "name\s*=" application.fam | sed 's/.*name\s*=\s*"\([^"]*\)".*/\1/' | head -1)
+                APP_NAME_CLEAN=$(echo "$APP_NAME" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/_/g')
+                FAP_VERSION=$(grep -E "fap_version\s*=" application.fam | sed 's/.*fap_version\s*=\s*"\([^"]*\)".*/\1/' | head -1)
+                echo "name=$APP_NAME" >> $GITHUB_OUTPUT
+                echo "clean_name=$APP_NAME_CLEAN" >> $GITHUB_OUTPUT
+                echo "fap_version=$FAP_VERSION" >> $GITHUB_OUTPUT
+
+            - name: Upload artifacts
+              uses: actions/upload-artifact@v6.0.0
+              with:
+                name: ${{ steps.app-info.outputs.fap_version }}
+                path: ${{ steps.build-app.outputs.fap-artifacts }}
+
+            - name: Create Release
+              uses: softprops/action-gh-release@v2.5.0
+              with:
+                tag_name: ${{ steps.app-info.outputs.fap_version }}
+                name: ${{ steps.app-info.outputs.name }} v${{ steps.app-info.outputs.fap_version }}
+                files: ${{ steps.build-app.outputs.fap-artifacts }}
+                body: |
+                    ### Installation
+                    1. Download the .fap file
+                    2. Copy the fap to the `/ext/apps/Infrared` folder of your Flipper Zero
+                    3. The application will appear in your Infrared application menu. Use it and enjoy!
+                draft: false
+              env:
+                GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
